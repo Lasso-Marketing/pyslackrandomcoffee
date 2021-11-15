@@ -1,0 +1,8 @@
+# GCP App Engine config
+
+runtime: python39
+service: pyslackrandomcoffee
+
+# do not check in env vars (secrets)
+includes:
+  - env_variables.yaml

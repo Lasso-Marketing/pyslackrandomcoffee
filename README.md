@@ -1,5 +1,7 @@
 # pyslackrandomcoffee
 
+---
+
 A very simple random coffee bot for slack that takes all the members in a channel and randomly matches them up for a
 coffee date and writes the matches in back in the same channel. Could be called weekly or daily from a scheduler or
 manually. The bot will look back in the history of the channel and find past matches and use these try to generate

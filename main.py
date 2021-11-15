@@ -4,15 +4,24 @@ import os
 import random
 import logging
 import datetime
+from threading import Thread
+
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
+from flask import Flask, request, Response
 
+# required in env_variables.yaml
+SLACK_SIGNING_SECRET = os.environ.get("SLACK_SIGNING_SECRET")
+CHANNEL = os.environ.get("SLACK_CHANNEL")
+CHANNEL_TESTING = os.environ.get("SLACK_CHANNEL_TESTING")
+SLACK_API_TOKEN = os.environ.get("SLACK_API_TOKEN")
+
+LOOKBACK_DAYS = 32
+MAGICAL_TEXT = "The new random coffee pairings are 🥁🥁🥁"
+
+app = Flask(__name__)
 # Setup - this function requires the SLACK_API_TOKEN environmental variable to run.
-client = WebClient(token=os.environ["SLACK_API_TOKEN"])
-CHANNEL         = '#randomcoffees'
-CHANNEL_TESTING = '#bot_testing'
-LOOKBACK_DAYS   = 28
-MAGICAL_TEXT    = 'This weeks random coffees are'
+client = WebClient(token=SLACK_API_TOKEN)
 
 
 def get_channel_id(channel):
@@ -293,23 +302,20 @@ def format_message_from_list_of_pairs(pairs):
 
     if len(pairs):
         m1 = MAGICAL_TEXT + ':\n'
-        pair_strings = ''.join([f' {i+1}. {p1} and {p2}\n' for i, (p1, p2) in enumerate(pairs)])
-        m2 = f'An uneven number of members results in one person getting two coffee matches. Matches from the last {LOOKBACK_DAYS} days considered to avoid matching the same members several times in the time period.'
+        pair_strings = ''.join([f' {i + 1}. {p1} and {p2}\n' for i, (p1, p2) in enumerate(pairs)])
+        m2 = f'An uneven number of members results in one person getting two coffee matches. ' \
+             f'Matches from the last {LOOKBACK_DAYS} days considered to avoid matching the same members several times in the time period.'
         message = m1 + pair_strings + m2
         return message
     else:
         return None
 
 
-def pyslackrandomcoffee(work_ids=None, testing=False):
+def pyslackrandomcoffee(testing=False):
     '''Pairs the members of a slack channel up randomly and post it back to the channel in a message.
 
     Args:
-        work_ids (list): Unused STAU required argument
         testing (bool): Flag if the CHANNEL_TESTING should be used.
-
-    Note:
-        This script does utilize work_ids, but STAU requires it, so it is present, but unused.
     '''
 
     if testing is False:
@@ -317,14 +323,51 @@ def pyslackrandomcoffee(work_ids=None, testing=False):
     else:
         channel = CHANNEL_TESTING
 
-    members        = get_members_list(channel, testing)
+    members = get_members_list(channel, testing)
     previous_pairs = get_previous_pairs(channel, testing)
-    pairs          = generate_pairs(members, previous_pairs)
-    message        = format_message_from_list_of_pairs(pairs)
+    pairs = generate_pairs(members, previous_pairs)
+    message = format_message_from_list_of_pairs(pairs)
 
     if message:
         post_to_slack_channel_message(message, channel)
 
 
+def verify_request(request):
+    # Convert your signing secret to bytes
+    slack_signing_secret = bytes(SLACK_SIGNING_SECRET, "utf-8")
+    request_body = request.get_data().decode()
+    slack_request_timestamp = request.headers["X-Slack-Request-Timestamp"]
+    slack_signature = request.headers["X-Slack-Signature"]
+    # Check that the request is no more than 60 seconds old
+    import time
+    if (int(time.time()) - int(slack_request_timestamp)) > 60:
+        print("Verification failed. Request is out of date.")
+        return False
+    # Create a basestring by concatenating the version, the request timestamp, and the request body
+    basestring = f"v0:{slack_request_timestamp}:{request_body}".encode("utf-8")
+    # Hash the basestring using your signing secret, take the hex digest, and prefix with the version number
+    import hmac
+    import hashlib
+    my_signature = ("v0=" + hmac.new(slack_signing_secret, basestring, hashlib.sha256).hexdigest())
+    # Compare the resulting signature with the signature on the request to verify the request
+    if hmac.compare_digest(my_signature, slack_signature):
+        return True
+    else:
+        print("Verification failed. Signature invalid.")
+        return False
+
+
+@app.route('/pair', methods=['POST'])
+def pair():
+    if not verify_request(request):
+        return Response(status=401)
+    testing = request.args.get('testing', default=False, type=lambda v: v.lower() == 'true')
+    thread = Thread(target=pyslackrandomcoffee, kwargs={
+        'testing': testing,
+    })
+    thread.start()
+    return Response(status=200)
+
+
 if __name__ == '__main__':
-    pyslackrandomcoffee(testing=True)
+    app.run()
