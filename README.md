@@ -1,5 +1,7 @@
 # pyslackrandomcoffee
 
+Fork of tjansson60/pyslackrandomcoffee repurposed as a Flask app for GCP App Engine. Original README below.
+
 ---
 
 A very simple random coffee bot for slack that takes all the members in a channel and randomly matches them up for a
